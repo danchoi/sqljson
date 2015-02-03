@@ -6,9 +6,13 @@ import System.Environment
 import Database.HDBC
 import Database.HDBC.PostgreSQL
 import Data.Convertible 
+import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.ByteString.Lazy.Char8 as B
+
+import Data.Maybe
+import qualified Data.HashMap.Strict as HM
 
 import Data.Aeson
 
@@ -16,16 +20,25 @@ import Data.Aeson
 -- https://hackage.haskell.org/package/HDBC-postgresql-2.3.2.1/docs/Database-HDBC-PostgreSQL.html
 -- http://hackage.haskell.org/package/HDBC-2.2.6.1/docs/Database-HDBC.html
 
+
 main = do
+    -- take input  json
+
+    input <- B.getContents
+    let xs = fromMaybe (error "Could not decode input") (decode input :: Maybe Value)
+
     [query] <- getArgs
     c <- connectPostgreSQL "dbname=iw4"
-    tables <- getTables c
-    print tables
-    print query
     stmt <- prepare c query
     _ <- execute stmt []
     res <- fetchAllRowsMap' stmt
-    B.putStrLn . encode $ res
+    let xs' = insert xs "titles" (toJSON res )
+    B.putStrLn . encode $ xs'
+    
+
+insert :: Value -> Text -> Value -> Value
+insert (Object target) key new = Object $ HM.insert key new target 
+
 
 
 instance ToJSON SqlValue where
