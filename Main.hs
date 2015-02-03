@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, StandaloneDeriving, GeneralizedNewtypeDeriving, BangPatterns, FlexibleContexts, MultiParamTypeClasses, ScopedTypeVariables #-}
+{-# LANGUAGE OverloadedStrings, StandaloneDeriving, GeneralizedNewtypeDeriving, BangPatterns, FlexibleContexts, MultiParamTypeClasses, ScopedTypeVariables, RecordWildCards #-}
 module Main where
 
 import System.Environment
@@ -10,7 +10,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.ByteString.Lazy.Char8 as B
-
+import Control.Applicative
 import Data.Maybe
 import qualified Data.HashMap.Strict as HM
 
@@ -27,7 +27,7 @@ main = do
     input <- B.getContents
     let xs = fromMaybe (error "Could not decode input") (decode input :: Maybe Value)
 
-    [query] <- getArgs
+    [keypath, query] <- getArgs
     c <- connectPostgreSQL "dbname=iw4"
     stmt <- prepare c query
     _ <- execute stmt []
@@ -35,6 +35,43 @@ main = do
     let xs' = insert xs "titles" (toJSON res )
     B.putStrLn . encode $ xs'
     
+
+type KeyPath = [Text]
+type ReplaceKeyName = Text
+
+data Conf = Conf {
+      targetKeyPath :: KeyPath
+    , replace :: ReplaceKeyName
+    , conn :: Connection
+    , query :: String
+    } 
+
+
+processTop :: Conf -> Value -> IO Value
+processTop conf v = 
+    case v of 
+      x@(Object v') -> process conf [] x
+      x -> error $ "Expected Object, but got " ++ show x
+
+process :: Conf -> KeyPath -> Value -> IO Value
+process conf@(Conf {..}) currentKeyPath@(k:ks) v = 
+    case v of 
+       (Object hm) -> do
+           let pairs = HM.toList hm
+           pairs' <- mapM (\(k,v) -> (,) <$> pure k 
+                                         -- track up current key path
+                                         <*> process conf (k:currentKeyPath) v) pairs
+           return . Object . HM.fromList $ pairs'
+
+       -- possible processing cases
+       (Array _)  | currentKeyPath == targetKeyPath -> runSql conf v          
+       (String _) | currentKeyPath == targetKeyPath -> runSql conf v 
+       _ -> return v
+
+runSql :: Conf -> Value -> IO Value
+runSql conf v = undefined
+
+
 
 insert :: Value -> Text -> Value -> Value
 insert (Object target) key new = Object $ HM.insert key new target 
