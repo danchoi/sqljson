@@ -64,6 +64,10 @@ process conf@(Conf {..}) currentKeyPath v =
            pairs' <- mapM (processPair conf currentKeyPath) pairs
            return . Object . HM.fromList $ pairs'
 
+       (Array vs) | currentKeyPath /= targetKeyPath -> do
+          vs' <- mapM (process conf currentKeyPath) . V.toList $ vs
+          return . Array . V.fromList $ vs'
+
        -- possible processing cases
        (Array _)  | currentKeyPath == targetKeyPath -> runSql conf v          
        (String _) | currentKeyPath == targetKeyPath -> runSql conf v 
@@ -80,7 +84,7 @@ runSql conf (Array v) =
     let vs = V.toList $ v
         ints =  catMaybes . map forceToInt $ vs
     in runSqlInts conf ints
-runSql conf (String v) = 
+runSql conf (String v) = do
     runSqlInts conf $ catMaybes . map ((either (const Nothing) (Just . fst)) . T.decimal) .  T.splitOn "," $ v
 
 forceToInt :: Value -> Maybe Int
