@@ -7,15 +7,17 @@ import Database.HDBC
 import Database.HDBC.PostgreSQL
 import Data.Convertible 
 import Data.Text (Text)
+import qualified Data.Text.Read as T
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.ByteString.Lazy.Char8 as B
 import Control.Applicative
 import Data.Maybe
 import qualified Data.HashMap.Strict as HM
-
+import qualified Data.Vector as V
+import Data.Scientific
 import Data.Aeson
-
+import Control.Monad (forM)
 
 -- https://hackage.haskell.org/package/HDBC-postgresql-2.3.2.1/docs/Database-HDBC-PostgreSQL.html
 -- http://hackage.haskell.org/package/HDBC-2.2.6.1/docs/Database-HDBC.html
@@ -25,15 +27,16 @@ main = do
     -- take input  json
 
     input <- B.getContents
-    let xs = fromMaybe (error "Could not decode input") (decode input :: Maybe Value)
+    let inputJSON :: Value
+        inputJSON = fromMaybe (error "Could not decode input") (decode input :: Maybe Value)
 
     [keypath, query] <- getArgs
     c <- connectPostgreSQL "dbname=iw4"
     stmt <- prepare c query
-    _ <- execute stmt []
-    res <- fetchAllRowsMap' stmt
-    let xs' = insert xs "titles" (toJSON res )
-    B.putStrLn . encode $ xs'
+    let conf = Conf (T.splitOn "." . T.pack $ keypath) "" stmt
+    res <- processTop conf inputJSON
+
+    B.putStrLn . encode $ res
     
 
 type KeyPath = [Text]
@@ -42,8 +45,7 @@ type ReplaceKeyName = Text
 data Conf = Conf {
       targetKeyPath :: KeyPath
     , replace :: ReplaceKeyName
-    , conn :: Connection
-    , query :: String
+    , stmt :: Statement
     } 
 
 
@@ -54,7 +56,7 @@ processTop conf v =
       x -> error $ "Expected Object, but got " ++ show x
 
 process :: Conf -> KeyPath -> Value -> IO Value
-process conf@(Conf {..}) currentKeyPath@(k:ks) v = 
+process conf@(Conf {..}) currentKeyPath v = 
     case v of 
        (Object hm) -> do
            let pairs = HM.toList hm
@@ -68,8 +70,32 @@ process conf@(Conf {..}) currentKeyPath@(k:ks) v =
        (String _) | currentKeyPath == targetKeyPath -> runSql conf v 
        _ -> return v
 
+
 runSql :: Conf -> Value -> IO Value
-runSql conf v = undefined
+runSql conf (Array v) = 
+    -- we must assume the vector is of Number ints at this point, since it matches the keypath
+    let vs = V.toList $ v
+        ints =  catMaybes . map forceToInt $ vs
+    in runSqlInts conf ints
+runSql conf (String v) = 
+    runSqlInts conf $ catMaybes . map ((either (const Nothing) (Just . fst)) . T.decimal) .  T.splitOn "," $ v
+
+forceToInt :: Value -> Maybe Int
+forceToInt (Number v) = toBoundedInteger v
+forceToInt (String v) = either (const Nothing) (Just . fst) . T.decimal $ v
+forceToInt x = error $ "Can't convert to Int: " ++ show x 
+
+runSqlInts :: Conf -> [Int] -> IO Value
+runSqlInts Conf {..} xs = do
+    xs <- forM xs 
+           (\x -> do
+              _ <- execute stmt [toSql x]
+              res <- fetchAllRowsMap' stmt
+              return res) 
+    return . toJSON . concat $ xs
+
+
+--             let xs' = insert xs "titles" (toJSON res )
 
 
 
