@@ -30,10 +30,11 @@ main = do
     let inputJSON :: Value
         inputJSON = fromMaybe (error "Could not decode input") (decode input :: Maybe Value)
 
-    [keypath, query] <- getArgs
+    [keypath, replacementKeyName, query] <- getArgs
     c <- connectPostgreSQL "dbname=iw4"
     stmt <- prepare c query
-    let conf = Conf (T.splitOn "." . T.pack $ keypath) "" stmt
+    -- reverse the keypath because we cons from left
+    let conf = Conf (reverse . T.splitOn "." . T.pack $ keypath) (T.pack replacementKeyName) stmt
     res <- processTop conf inputJSON
 
     B.putStrLn . encode $ res
@@ -44,7 +45,7 @@ type ReplaceKeyName = Text
 
 data Conf = Conf {
       targetKeyPath :: KeyPath
-    , replace :: ReplaceKeyName
+    , replacementKeyName :: ReplaceKeyName
     , stmt :: Statement
     } 
 
@@ -60,9 +61,7 @@ process conf@(Conf {..}) currentKeyPath v =
     case v of 
        (Object hm) -> do
            let pairs = HM.toList hm
-           pairs' <- mapM (\(k,v) -> (,) <$> pure k 
-                                         -- track up current key path
-                                         <*> process conf (k:currentKeyPath) v) pairs
+           pairs' <- mapM (processPair conf currentKeyPath) pairs
            return . Object . HM.fromList $ pairs'
 
        -- possible processing cases
@@ -70,6 +69,10 @@ process conf@(Conf {..}) currentKeyPath v =
        (String _) | currentKeyPath == targetKeyPath -> runSql conf v 
        _ -> return v
 
+processPair :: Conf -> KeyPath -> (Text, Value) -> IO (Text, Value)
+processPair conf@Conf {..} baseKeyPath (k,v) = 
+    let k' = if (k:baseKeyPath) == targetKeyPath then replacementKeyName else k
+    in (,) <$> pure k' <*> process conf (k:baseKeyPath) v
 
 runSql :: Conf -> Value -> IO Value
 runSql conf (Array v) = 
