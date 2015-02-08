@@ -29,15 +29,23 @@ import System.IO
 
 data Options = Options {
     dbConnString :: String
-  , rawPrograms :: String
+  , rawPrograms :: Program
   } deriving Show
+
+data Program = RawProgram String | ProgFile FilePath  deriving Show
 
 parseOpts :: O.Parser Options
 parseOpts = Options 
     <$> O.argument O.str 
           (O.metavar "DBCONN" <> O.help "postgresql connection string, e.g. \"dbconn=mydb\"")
-    <*> O.argument O.str 
-          (O.metavar "PROGS" <> O.help "patterns and queries to run against the DB and input JSON")
+    <*> (strPrograms <|> progFile)
+  where strPrograms = 
+          RawProgram <$>  
+             O.argument O.str 
+                  (O.metavar "PROGS" 
+                    <> O.help "patterns and queries to run against the DB and input JSON")
+        progFile = ProgFile <$> 
+          (O.strOption (O.short 'f' <> O.metavar "FILE" <> O.help "File containing programs"))
 
 opts = O.info (O.helper <*> parseOpts) 
           (O.fullDesc 
@@ -47,8 +55,11 @@ opts = O.info (O.helper <*> parseOpts)
 
 main = do
     Options {..} <- O.execParser opts
+    rawPrograms' <- case rawPrograms of 
+                      RawProgram s -> return s
+                      ProgFile f -> readFile f
     let progs :: [Prog] 
-        progs = parseArgs . T.pack $ rawPrograms
+        progs = parseArgs . T.pack $ rawPrograms'
     input <- B.getContents
     let inputJSON :: Value
         inputJSON = fromMaybe (error "Could not decode input") (decode input :: Maybe Value)
