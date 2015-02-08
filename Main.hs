@@ -17,66 +17,94 @@ import qualified Data.HashMap.Strict as HM
 import qualified Data.Vector as V
 import Data.Scientific
 import Data.Aeson
-import Control.Monad (forM)
+import Control.Monad (forM, foldM)
 import Data.Attoparsec.Text
 import qualified Options.Applicative as O
+import Data.Monoid
+import System.IO 
 
 -- https://hackage.haskell.org/package/HDBC-postgresql-2.3.2.1/docs/Database-HDBC-PostgreSQL.html
 -- http://hackage.haskell.org/package/HDBC-2.2.6.1/docs/Database-HDBC.html
 
 
-main = do
-    -- take input  json
+data Options = Options {
+    dbConnString :: String
+  , rawPrograms :: String
+  } deriving Show
 
+parseOpts :: O.Parser Options
+parseOpts = Options 
+    <$> O.argument O.str 
+          (O.metavar "DBCONN" <> O.help "postgresql connection string, e.g. \"dbconn=mydb\"")
+    <*> O.argument O.str 
+          (O.metavar "PROGS" <> O.help "patterns and queries to run against the DB and input JSON")
+
+opts = O.info (O.helper <*> parseOpts) 
+          (O.fullDesc 
+            <> O.progDesc "Merge decorate JSON with results of SQL queries"
+            <> O.header "sqljson"
+            <> O.footer "https://github.com/danchoi/sqljson")
+
+main = do
+    Options {..} <- O.execParser opts
+    let progs :: [Prog] 
+        progs = parseArgs . T.pack $ rawPrograms
     input <- B.getContents
     let inputJSON :: Value
         inputJSON = fromMaybe (error "Could not decode input") (decode input :: Maybe Value)
-
-    [keypath, replacementKeyName, query] <- getArgs
-    c <- connectPostgreSQL "dbname=iw4"
-    stmt <- prepare c query
-    -- reverse the keypath because we cons from left
-    let conf = Conf (reverse . T.splitOn "." . T.pack $ keypath) (T.pack replacementKeyName) stmt
-    res <- processTop conf inputJSON
-
-    B.putStrLn . encode $ res
+    c <- connectPostgreSQL dbConnString
+    resultJSON <- foldM (runProg c) inputJSON progs 
+    B.putStrLn . encode $ resultJSON
     
+
+runProg :: Connection -> Value -> Prog -> IO Value
+runProg c v prog@(Prog keypath replacement query) = do
+    hPutStrLn stderr (show prog)
+    stmt <- prepare c query
+    let conf = Conf keypath replacement stmt
+    processTop conf v
 
 ------------------------------------------------------------------------
 -- parse the keypath, replacementKeyName, query
 
--- syntax is [keypath replacementName : query ; ] which can by repeated
+-- syntax is [keypath : replacementName : query [;]? ] which can by repeated
 
-data Conf' = Conf' KeyPath Text Text deriving Show
+data Prog = Prog KeyPath Text String deriving Show
 
-pConf :: Parser Conf'
-pConf = Conf' 
-    <$> pKeyPath
-    <*> pReplacementName
+parseArgs :: Text -> [Prog]
+parseArgs x = 
+    either (const []) id (parseOnly pProgs x) 
+
+pProgs :: Parser [Prog]
+pProgs = pProg `sepBy` char ';'
+
+pProg :: Parser Prog
+pProg = Prog
+    <$> (pKeyPath <* char ':')
+    <*> (pReplacementName <* char ':')
     <*> pSqlStmt
 
-
 pKeyPath :: Parser KeyPath
-pKeyPath = undefined
+pKeyPath = (reverse . T.splitOn "." . T.strip) <$> takeWhile1 (notInClass ":")
 
 pReplacementName :: Parser ReplaceKeyName
-pReplacementName = undefined
+pReplacementName = T.strip <$> takeWhile1 (notInClass ":")
 
-pSqlStmt :: Parser Text
-pSqlStmt = undefined
+pSqlStmt :: Parser String
+pSqlStmt = 
+    T.unpack . T.strip <$> takeTill (inClass ";") 
 
 ------------------------------------------------------------------------
-
-
 data Conf = Conf {
       targetKeyPath :: KeyPath
     , replacementKeyName :: ReplaceKeyName
     , stmt :: Statement
     } 
 
+-- keypath is top parent last because we cons from left
 type KeyPath = [Text]
-type ReplaceKeyName = Text
 
+type ReplaceKeyName = Text
 
 processTop :: Conf -> Value -> IO Value
 processTop conf v = 
