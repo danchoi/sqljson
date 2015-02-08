@@ -18,6 +18,8 @@ import qualified Data.Vector as V
 import Data.Scientific
 import Data.Aeson
 import Control.Monad (forM)
+import Data.Attoparsec.Text
+import qualified Options.Applicative as O
 
 -- https://hackage.haskell.org/package/HDBC-postgresql-2.3.2.1/docs/Database-HDBC-PostgreSQL.html
 -- http://hackage.haskell.org/package/HDBC-2.2.6.1/docs/Database-HDBC.html
@@ -40,14 +42,40 @@ main = do
     B.putStrLn . encode $ res
     
 
-type KeyPath = [Text]
-type ReplaceKeyName = Text
+------------------------------------------------------------------------
+-- parse the keypath, replacementKeyName, query
+
+-- syntax is [keypath replacementName : query ; ] which can by repeated
+
+data Conf' = Conf' KeyPath Text Text deriving Show
+
+pConf :: Parser Conf'
+pConf = Conf' 
+    <$> pKeyPath
+    <*> pReplacementName
+    <*> pSqlStmt
+
+
+pKeyPath :: Parser KeyPath
+pKeyPath = undefined
+
+pReplacementName :: Parser ReplaceKeyName
+pReplacementName = undefined
+
+pSqlStmt :: Parser Text
+pSqlStmt = undefined
+
+------------------------------------------------------------------------
+
 
 data Conf = Conf {
       targetKeyPath :: KeyPath
     , replacementKeyName :: ReplaceKeyName
     , stmt :: Statement
     } 
+
+type KeyPath = [Text]
+type ReplaceKeyName = Text
 
 
 processTop :: Conf -> Value -> IO Value
