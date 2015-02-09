@@ -47,6 +47,7 @@ parseOpts = Options
         progFile = ProgFile <$> 
           (O.strOption (O.short 'f' <> O.metavar "FILE" <> O.help "File containing programs"))
 
+opts :: O.ParserInfo Options
 opts = O.info (O.helper <*> parseOpts) 
           (O.fullDesc 
             <> O.progDesc "Merge decorate JSON with results of SQL queries"
