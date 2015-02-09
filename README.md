@@ -5,8 +5,10 @@ A JSON transformer that adds values from a database
 
 ## Usage
 
+```
 Usage: sqljson DBCONN (PROGS | -f FILE)
   Merge decorate JSON with results of SQL queries
+```
 
 The syntax of PROGS is 
 
