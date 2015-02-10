@@ -22,7 +22,7 @@ executable sqljson
   build-depends:       base >=4.6 && <4.8
                      , HDBC
                      , HDBC-postgresql
-                     , aeson
+                     , aeson >= 0.8
                      , text
                      , bytestring
                      , convertible
