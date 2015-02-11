@@ -71,7 +71,7 @@ main = do
 
 runProg :: Connection -> Value -> Prog -> IO Value
 runProg c v prog@(Prog keypath replacement query) = do
-    hPutStrLn stderr (show prog)
+    -- hPutStrLn stderr (show prog)
     stmt <- prepare c query
     let conf = Conf keypath replacement stmt
     processTop conf v
