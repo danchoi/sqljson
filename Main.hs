@@ -74,7 +74,7 @@ main = do
           then do 
             -- [Int]
             ids :: [Int] <- (map read . words) `fmap` getContents
-            return . Array $ V.fromList $ map (Number . flip scientific 1 . fromIntegral) ids
+            return . Array $ V.fromList $ map (Number . flip scientific 0 . fromIntegral) ids
           else do
             input <- B.getContents
             return $ fromMaybe (error "Could not decode input") (decode input :: Maybe Value)

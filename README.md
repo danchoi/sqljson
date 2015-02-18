@@ -31,9 +31,10 @@ process: currentKeyPath: []
 [{"title":"Date Movie (Unrated)"},{"title":"Holler Creek Canyon"},{"title":"Freedomland"}]
 
 
-$ echo '6 7 11' | dist sqljson -t dbname=mydb "::select title from titles where id = ?" -d
+$ echo '6 7 11' | dist sqljson -t dbname=iw4 "::select title from titles where id = ?" -d
 [Prog [] "" "select title from titles where id = ?"]
 process: currentKeyPath: []
-         currentValue: Array (fromList [Number 60.0,Number 70.0,Number 110.0])
-[{"title":"The Secret Life of Whitetails"},{"title":"One Of Us"},{"title":"Besties"}]
+         currentValue: Array (fromList [Number 6.0,Number 7.0,Number 11.0])
+[{"title":"Date Movie (Unrated)"},{"title":"Holler Creek Canyon"},{"title":"Freedomland"}]
 ```
+
