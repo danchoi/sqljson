@@ -81,7 +81,11 @@ main = do
 
     c <- connectPostgreSQL dbConnString
     resultJSON <- foldM (runProg c optDebug) inputJSON progs 
-    B.putStrLn . encode $ resultJSON
+    case resultJSON of
+      (Array v) | plainTextInput -> 
+          -- print as object stream
+          mapM_ (B.putStrLn . encode) $ V.toList v
+      _ ->  B.putStrLn . encode $ resultJSON
     
 
 runProg :: Connection -> Bool -> Value -> Prog -> IO Value
