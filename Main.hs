@@ -17,28 +17,34 @@ import qualified Data.HashMap.Strict as HM
 import qualified Data.Vector as V
 import Data.Scientific
 import Data.Aeson
-import Control.Monad (forM, foldM)
-import Data.Attoparsec.Text
+import Control.Monad (forM, foldM, when)
+import Data.Attoparsec.Text hiding (scientific)
+import Prelude hiding (takeWhile)
 import qualified Options.Applicative as O
 import Data.Monoid
 import System.IO 
+import System.Exit
 
 -- https://hackage.haskell.org/package/HDBC-postgresql-2.3.2.1/docs/Database-HDBC-PostgreSQL.html
 -- http://hackage.haskell.org/package/HDBC-2.2.6.1/docs/Database-HDBC.html
 
 
 data Options = Options {
-    dbConnString :: String
+    plainTextInput :: Bool
+  , dbConnString :: String
   , rawPrograms :: Program
+  , optDebug :: Bool
   } deriving Show
 
 data Program = RawProgram String | ProgFile FilePath  deriving Show
 
 parseOpts :: O.Parser Options
 parseOpts = Options 
-    <$> O.argument O.str 
+    <$> O.flag False True (O.short 't' <> O.help "Plain text input")
+    <*> O.argument O.str 
           (O.metavar "DBCONN" <> O.help "postgresql connection string, e.g. \"dbconn=mydb\"")
     <*> (strPrograms <|> progFile)
+    <*> O.flag False True (O.short 'd' <> O.help "Debug parsed program")
   where strPrograms = 
           RawProgram <$>  
              O.argument O.str 
@@ -61,19 +67,28 @@ main = do
                       ProgFile f -> readFile f
     let progs :: [Prog] 
         progs = parseArgs . T.pack $ rawPrograms'
-    input <- B.getContents
-    let inputJSON :: Value
-        inputJSON = fromMaybe (error "Could not decode input") (decode input :: Maybe Value)
+    when optDebug $ do
+        print progs
+    inputJSON :: Value <- do
+          if plainTextInput
+          then do 
+            -- [Int]
+            ids :: [Int] <- (map read . words) `fmap` getContents
+            return . Array $ V.fromList $ map (Number . flip scientific 1 . fromIntegral) ids
+          else do
+            input <- B.getContents
+            return $ fromMaybe (error "Could not decode input") (decode input :: Maybe Value)
+
     c <- connectPostgreSQL dbConnString
-    resultJSON <- foldM (runProg c) inputJSON progs 
+    resultJSON <- foldM (runProg c optDebug) inputJSON progs 
     B.putStrLn . encode $ resultJSON
     
 
-runProg :: Connection -> Value -> Prog -> IO Value
-runProg c v prog@(Prog keypath replacement query) = do
+runProg :: Connection -> Bool -> Value -> Prog -> IO Value
+runProg c debug v prog@(Prog keypath replacement query) = do
     -- hPutStrLn stderr (show prog)
     stmt <- prepare c query
-    let conf = Conf keypath replacement stmt
+    let conf = Conf keypath replacement stmt debug
     processTop conf v
 
 ------------------------------------------------------------------------
@@ -97,10 +112,14 @@ pProg = Prog
     <*> pSqlStmt
 
 pKeyPath :: Parser KeyPath
-pKeyPath = (reverse . T.splitOn "." . T.strip) <$> takeWhile1 (notInClass ":")
+pKeyPath = do 
+    x <- (reverse . T.splitOn "." . T.strip) <$> takeWhile (notInClass ":")
+    if x == [""] 
+      then return []
+      else return x
 
 pReplacementName :: Parser ReplaceKeyName
-pReplacementName = T.strip <$> takeWhile1 (notInClass ":")
+pReplacementName = T.strip <$> takeWhile (notInClass ":")
 
 pSqlStmt :: Parser String
 pSqlStmt = 
@@ -108,24 +127,31 @@ pSqlStmt =
 
 ------------------------------------------------------------------------
 data Conf = Conf {
-      targetKeyPath :: KeyPath
+      targetKeyPath :: KeyPath 
     , replacementKeyName :: ReplaceKeyName
     , stmt :: Statement
+    , debugMode :: Bool
     } 
 
 -- keypath is top parent last because we cons from left
+-- A keypath of [""] means take the value itself (a String, Number, or Bool) as the parameter.
 type KeyPath = [Text]
 
+-- a replacement name of "" means replace in place
 type ReplaceKeyName = Text
 
 processTop :: Conf -> Value -> IO Value
 processTop conf v = 
     case v of 
       x@(Object v') -> process conf [] x
-      x -> error $ "Expected Object, but got " ++ show x
+      x@(Array v') -> process conf [] x
+      x -> error $ "Expected Object or Array, but got " ++ show x
 
 process :: Conf -> KeyPath -> Value -> IO Value
-process conf@(Conf {..}) currentKeyPath v = 
+process conf@(Conf {..}) currentKeyPath v = do
+    when debugMode $ do
+      putStrLn $ "process: currentKeyPath: " ++ show currentKeyPath 
+      putStrLn $ "         currentValue: " ++ show v
     case v of 
        (Object hm) -> do
            let pairs = HM.toList hm
