@@ -3,6 +3,7 @@ module Main where
 
 import System.Environment
 
+import Database.HDBC.Aeson
 import Database.HDBC
 import Database.HDBC.PostgreSQL
 import Data.Convertible 
@@ -192,12 +193,7 @@ forceToInt x = error $ "Can't convert to Int: " ++ show x
 
 runSqlInts :: Conf -> [Int] -> IO Value
 runSqlInts Conf {..} xs = do
-    xs <- forM xs 
-           (\x -> do
-              _ <- execute stmt [toSql x]
-              res <- fetchAllRowsMap' stmt
-              return res) 
-    return . toJSON . concat $ xs
+    queryJ stmt $ map toSql xs 
 
 
 --             let xs' = insert xs "titles" (toJSON res )
@@ -206,45 +202,5 @@ runSqlInts Conf {..} xs = do
 
 insert :: Value -> Text -> Value -> Value
 insert (Object target) key new = Object $ HM.insert key new target 
-
-
-
-instance ToJSON SqlValue where
-    toJSON (SqlByteString x) = String . T.decodeUtf8 $ x
-    toJSON (SqlInt32 x) = Number $ fromIntegral x
-    toJSON (SqlInteger x) = Number $ fromIntegral  x
-    toJSON (SqlRational x) = Number $ realToFrac x
-    toJSON (SqlDouble x) = Number $ realToFrac x
-    toJSON (SqlBool x) = Bool x
-    toJSON (SqlLocalTime x) = String . T.pack . show $ x
-    toJSON SqlNull = Null
-    toJSON x = error $ "Please implement ToJSON instance for SqlValue: " ++ show x
-
-instance Convertible SqlValue Value where
-    safeConvert (SqlString x) = return . String . T.pack $ x
-    safeConvert (SqlByteString x) = return . String . T.decodeUtf8 $ x
-    safeConvert (SqlWord32 x) = return . Number . fromIntegral $ x
-    safeConvert (SqlWord64 x) = return . Number . fromIntegral $ x
-    safeConvert (SqlInt32 x) = return . Number . fromIntegral $ x
-    safeConvert (SqlInt64 x) = return . Number . fromIntegral $ x
-    safeConvert (SqlInteger x) = return . Number . fromIntegral $ x
-    safeConvert (SqlChar x) = return . String . T.pack $ [x]
-    safeConvert (SqlBool x) = return . Bool $ x
-    safeConvert (SqlDouble x) = return . Number . realToFrac $ x
-    safeConvert (SqlRational x) = return . Number . realToFrac $ x
-    safeConvert (SqlNull) = return Null
-    safeConvert x = error $ "Please implement Convertible SqlValue Value for " ++ show x
-  {-
-    You may implement these later:
-
-    SqlLocalDate Day	
-    SqlLocalTimeOfDay TimeOfDay	
-    SqlZonedLocalTimeOfDay TimeOfDay TimeZone	
-    SqlLocalTime LocalTime	
-    SqlZonedTime ZonedTime	
-    SqlUTCTime UTCTime	
-    SqlDiffTime NominalDiffTime	
-    SqlPOSIXTime POSIXTime	
-  -}
 
 
